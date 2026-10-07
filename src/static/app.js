@@ -1,8 +1,41 @@
 document.addEventListener("DOMContentLoaded", () => {
   const activitiesList = document.getElementById("activities-list");
   const activitySelect = document.getElementById("activity");
+  const signupContainer = document.getElementById("signup-container");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const accountButton = document.getElementById("account-button");
+  const accountPanel = document.getElementById("account-panel");
+  const loginButton = document.getElementById("login-button");
+  const logoutButton = document.getElementById("logout-button");
+  const teacherStatus = document.getElementById("teacher-status");
+  const loginDialog = document.getElementById("login-dialog");
+  const loginForm = document.getElementById("login-form");
+  const loginMessage = document.getElementById("login-message");
+  const registrationNotice = document.getElementById("registration-notice");
+  let teacherUsername = null;
+
+  function updateAccountUI() {
+    const isTeacher = Boolean(teacherUsername);
+    signupContainer.hidden = !isTeacher;
+    registrationNotice.hidden = isTeacher;
+    loginButton.classList.toggle("hidden", isTeacher);
+    teacherStatus.classList.toggle("hidden", !isTeacher);
+    logoutButton.classList.toggle("hidden", !isTeacher);
+    teacherStatus.textContent = isTeacher ? `Signed in as ${teacherUsername}` : "";
+  }
+
+  async function loadTeacherSession() {
+    try {
+      const response = await fetch("/auth/session");
+      const session = await response.json();
+      teacherUsername = session.authenticated ? session.username : null;
+    } catch (error) {
+      teacherUsername = null;
+      console.error("Error checking teacher session:", error);
+    }
+    updateAccountUI();
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +45,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      while (activitySelect.options.length > 1) {
+        activitySelect.remove(1);
+      }
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -30,7 +66,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        teacherUsername
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Unregister ${email} from ${name}">Unregister</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -155,6 +195,73 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  accountButton.addEventListener("click", () => {
+    const isExpanded = accountButton.getAttribute("aria-expanded") === "true";
+    accountButton.setAttribute("aria-expanded", String(!isExpanded));
+    accountPanel.classList.toggle("hidden", isExpanded);
+  });
+
+  loginButton.addEventListener("click", () => {
+    accountPanel.classList.add("hidden");
+    accountButton.setAttribute("aria-expanded", "false");
+    loginMessage.textContent = "";
+    loginMessage.classList.add("hidden");
+    loginDialog.showModal();
+  });
+
+  document.getElementById("cancel-login").addEventListener("click", () => {
+    loginDialog.close();
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(loginForm);
+
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: formData.get("username"),
+          password: formData.get("password"),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to sign in");
+      }
+
+      teacherUsername = result.username;
+      loginForm.reset();
+      loginDialog.close();
+      updateAccountUI();
+      await fetchActivities();
+    } catch (error) {
+      loginMessage.textContent = error.message || "Unable to sign in. Please try again.";
+      loginMessage.classList.remove("hidden");
+    }
+  });
+
+  logoutButton.addEventListener("click", async () => {
+    try {
+      const response = await fetch("/auth/logout", { method: "POST" });
+      if (!response.ok) {
+        throw new Error("Unable to log out");
+      }
+
+      teacherUsername = null;
+      accountPanel.classList.add("hidden");
+      accountButton.setAttribute("aria-expanded", "false");
+      updateAccountUI();
+      await fetchActivities();
+    } catch (error) {
+      messageDiv.textContent = error.message || "Unable to log out. Please try again.";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+    }
+  });
+
   // Initialize app
-  fetchActivities();
+  loadTeacherSession().then(fetchActivities);
 });
